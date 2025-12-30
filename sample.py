@@ -218,7 +218,7 @@ def main():
         )
         generate_continuous_blocks(
             model,
-            num_blocks=30,
+            num_blocks=10,
             temperature=1.0,
             dataset_tokens=dataset_tokens,
             method=method,

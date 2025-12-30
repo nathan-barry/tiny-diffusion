@@ -3,9 +3,6 @@
 A character-level language diffusion model for text generation. The model is a modified version of the [nanochat gpt](https://github.com/karpathy/nanochat/blob/master/nanochat/gpt.py
 ) implementation and is trained on Tiny Shakespeare! It is only 10.7 million parameters, so you can try it out locally!
 
-![Demo](animations/animation.gif)
-
-
 
 ## Installation
 
@@ -16,8 +13,10 @@ cd tiny-diffusion
 
 # Install dependencies (Python 3.10+)
 uv sync
-```
 
+# Download the dataset
+wget https://github.com/nathan-barry/tiny-diffusion/releases/download/v2.0.0/data.txt
+```
 
 
 ## Quick Start
@@ -25,8 +24,6 @@ uv sync
 The file `training.py` puts the weights in `weights/diffusion_model.pt`. The sample and animation files load the model from this file.
 
 ### Train Your Own Model
-Currently, the weights are already provided for you! It took me around half an hour to train this model for 20,000 steps on an A100. But if you want to retrain the model again, run:
-
 ```bash
 # Train from scratch on Shakespeare
 uv run training.py
@@ -35,7 +32,7 @@ uv run training.py
 ```
 
 ### Generate Text
-To generate a continuous stream of output (currently 30 context lengths), run:
+To generate a continuous stream of output (currently 10 context lengths), run:
 
 ```bash
 # Generate samples using the pre-trained model
@@ -54,7 +51,6 @@ uv run animations/game-of-life.py
 ```
 
 
-
 ## Default Config
 
 - **Parameters**: 10.7 million
@@ -63,7 +59,6 @@ uv run animations/game-of-life.py
 - **Embedding Dim**: 384
 - **Sequence Length**: 256 characters
 - **Diffusion Steps**: 128
-
 
 
 ## File Structure
@@ -81,7 +76,6 @@ tiny-diffusion/
     ├── diffusion-process.py    # Denoising visualization
     └── game-of-life.py         # Game of Life sampling
 ```
-
 
 
 ## License
