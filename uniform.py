@@ -34,12 +34,10 @@ with open("data.txt", "r", encoding="utf-8") as f:
 
 # All the unique characters that occur in this text
 chars = sorted(list(set(text)))
-chars = ["_"] + chars  # [NEW]: Add underscore (doesn't appear in text)
 vocab_size = len(chars)
 # Create a mapping from characters to integers
 stoi = {ch: i for i, ch in enumerate(chars)}
 itos = {i: ch for i, ch in enumerate(chars)}
-mask_token_id = stoi["_"]  # [NEW]: Set mask token to underscore
 
 
 # encoder: take a string, output a list of integers
@@ -59,7 +57,7 @@ train_data = data[:n]
 val_data = data[n:]
 
 
-# [NEW]: Modify get batch to do masking
+# [NEW]: Modify get batch to do random token replacement instead of masking
 def get_batch(split):
     # generate a small batch of data of inputs x and targets y
     data = train_data if split == "train" else val_data
@@ -67,13 +65,14 @@ def get_batch(split):
     x = torch.stack([data[i : i + block_size] for i in idx])
     y = x.clone()  # original tokens
 
-    # Mask tokens with random probability per sample
-    mask_probs = torch.rand(batch_size, 1)
-    mask = torch.rand(batch_size, block_size) < mask_probs
-    x[mask] = mask_token_id
+    # Replace tokens with random tokens with random probability per sample
+    noise_probs = torch.rand(batch_size, 1)
+    noise_mask = torch.rand(batch_size, block_size) < noise_probs
+    random_tokens = torch.randint(0, vocab_size, (batch_size, block_size))
+    x[noise_mask] = random_tokens[noise_mask]
 
-    x, y, mask = x.to(device), y.to(device), mask.to(device)
-    return x, y, mask
+    x, y, noise_mask = x.to(device), y.to(device), noise_mask.to(device)
+    return x, y, noise_mask
 
 
 def norm(x):
@@ -221,74 +220,40 @@ class Model(nn.Module):
             logits_flat = logits.view(B * T, C)
             targets_flat = targets.view(B * T)
 
-            # [NEW]: Only compute loss on masked tokens if mask is provided
-            if mask is not None:
-                mask_flat = mask.view(B * T)
-                loss = F.cross_entropy(logits_flat, targets_flat, reduction="none")
-                loss = (loss * mask_flat).sum() / mask_flat.sum()
-            else:
-                loss = F.cross_entropy(logits_flat, targets_flat)
+            # [NEW]: Compute loss on all tokens, not just noised ones
+            loss = F.cross_entropy(logits_flat, targets_flat)
 
         return logits, loss
 
 
-# [NEW]: Change next-token-prediction to confidence-based parallel decoding
+# [NEW]: Generate by iteratively refining random tokens, greedily selecting most confident
 @torch.no_grad()
-def generate(
-    model, max_new_tokens, prompt_len=16, temp=1.0, confidence_threshold=0.95, top_k=3
-):
+def generate(model, max_new_tokens, prompt_len=16, num_steps=256):
     all_tokens = data[:prompt_len].tolist()
-    total_steps = 0
 
     # Generate one block at a time
     while len(all_tokens) - prompt_len < max_new_tokens:
         # How many tokens to generate this block
         block_len = min(240, prompt_len + max_new_tokens - len(all_tokens))
 
-        # Initialize: last prompt_len tokens + masks
-        x = torch.full((1, block_size), mask_token_id, dtype=torch.long, device=device)
+        # Initialize: last prompt_len tokens + random tokens for positions to generate
+        x = torch.randint(
+            0, vocab_size, (1, block_size), dtype=torch.long, device=device
+        )
         x[0, :prompt_len] = torch.tensor(all_tokens[-prompt_len:], device=device)
 
-        # Track which positions need decoding
-        masked = torch.zeros(1, block_size, dtype=torch.bool, device=device)
-        masked[0, prompt_len : prompt_len + block_len] = True
-
-        # Iteratively decode
-        while masked.any():
-            total_steps += 1
-
-            # Get predictions and confidences
+        # Iteratively refine: run model multiple times, each time picking most confident tokens
+        for _ in range(num_steps):
+            # Get predictions for all positions
             logits, _ = model(x)
-            probs = F.softmax(logits / temp, dim=-1)
-            top_k_probs, top_k_indices = torch.topk(probs, k=top_k, dim=-1)
-            confidences = top_k_probs.sum(dim=-1)
 
-            # Decode high-confidence masked positions (or at least 1)
-            decode_mask = (confidences >= confidence_threshold) & masked
-            if not decode_mask.any():
-                masked_confidences = torch.where(
-                    masked, confidences, torch.tensor(-float("inf"))
-                )
-                decode_mask.view(-1)[masked_confidences.argmax()] = True
-
-            # Sample from top-k and update
-            top_k_probs_norm = top_k_probs / top_k_probs.sum(dim=-1, keepdim=True)
-            sampled_k = torch.multinomial(top_k_probs_norm.view(-1, top_k), 1).view(
-                1, block_size
-            )
-            sampled_tokens = torch.gather(
-                top_k_indices, -1, sampled_k.unsqueeze(-1)
-            ).squeeze(-1)
-
-            x = torch.where(decode_mask, sampled_tokens, x)
-            masked = masked & ~decode_mask
+            # Greedily select most confident token for each position after prompt
+            most_confident = logits.argmax(dim=-1)
+            x[0, prompt_len:] = most_confident[0, prompt_len:]
 
         # Extract and append generated tokens
         all_tokens.extend(x[0, prompt_len : prompt_len + block_len].tolist())
 
-    tokens_generated = len(all_tokens) - prompt_len
-    print(f"Total steps: {total_steps} for {tokens_generated} tokens")
-    print(f"Avg decoded per step: {tokens_generated / total_steps:.2f}")
     return decode(all_tokens)
 
 
@@ -309,7 +274,7 @@ def estimate_loss():
 
 if __name__ == "__main__":
     train_flag = "--train" in sys.argv
-    weights_path = "weights/diffusion.pt"
+    weights_path = "weights/uniform.pt"
     os.makedirs(os.path.dirname(weights_path), exist_ok=True)
 
     model = Model()
