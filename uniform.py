@@ -226,9 +226,9 @@ class Model(nn.Module):
         return logits, loss
 
 
-# [NEW]: Generate by iteratively refining random tokens, greedily selecting most confident
+# [NEW]: Generate by iteratively refining random tokens with temperature and top_p sampling
 @torch.no_grad()
-def generate(model, max_new_tokens, prompt_len=16, num_steps=256):
+def generate(model, max_new_tokens, prompt_len=16, num_steps=256, temp=1.0, top_p=0.9):
     all_tokens = data[:prompt_len].tolist()
 
     # Generate one block at a time
@@ -242,14 +242,21 @@ def generate(model, max_new_tokens, prompt_len=16, num_steps=256):
         )
         x[0, :prompt_len] = torch.tensor(all_tokens[-prompt_len:], device=device)
 
-        # Iteratively refine: run model multiple times, each time picking most confident tokens
+        # Iteratively refine: run model multiple times, each time sampling tokens
         for _ in range(num_steps):
             # Get predictions for all positions
             logits, _ = model(x)
+            probs = F.softmax(logits / temp, dim=-1)
 
-            # Greedily select most confident token for each position after prompt
-            most_confident = logits.argmax(dim=-1)
-            x[0, prompt_len:] = most_confident[0, prompt_len:]
+            # Apply top_p (nucleus) sampling
+            probs_flat = probs.view(-1, vocab_size)
+            sorted_probs, sorted_indices = torch.sort(probs_flat, descending=True, dim=-1)
+            cumsum_probs = torch.cumsum(sorted_probs, dim=-1)
+            nucleus_mask = cumsum_probs - sorted_probs <= top_p
+            filtered_probs = torch.zeros_like(probs_flat).scatter_(1, sorted_indices, sorted_probs * nucleus_mask)
+            filtered_probs /= filtered_probs.sum(dim=-1, keepdim=True)
+            sampled = torch.multinomial(filtered_probs, 1).view(1, block_size)
+            x[0, prompt_len:] = sampled[0, prompt_len:]
 
         # Extract and append generated tokens
         all_tokens.extend(x[0, prompt_len : prompt_len + block_len].tolist())
@@ -303,7 +310,7 @@ if __name__ == "__main__":
                     f"val loss {losses['val']:.4f}, time {time.time() - start:.2f} seconds"
                 )
                 # Generate a sample
-                sample = generate(m, max_new_tokens=240)
+                sample = generate(m, max_new_tokens=240, num_steps=64, temp=0.8, top_p=0.9)
                 print(f"Sample:\n{sample}\n")
 
             # sample a batch of data
@@ -322,8 +329,6 @@ if __name__ == "__main__":
 
     # generate from the model
     start = time.time()
-    output = generate(
-        m, max_new_tokens=2000, temp=0.8, confidence_threshold=0.95, top_k=2
-    )
+    output = generate(m, max_new_tokens=2000, num_steps=256, temp=0.8, top_p=0.9)
     print(f"Total generation time: {time.time() - start:.2f} seconds")
     print(f"\nOutput:\n{output}")
