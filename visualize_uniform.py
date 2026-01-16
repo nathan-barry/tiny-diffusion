@@ -210,7 +210,7 @@ def escape_latex_chars(text):
 
 def animate_comparison(diffusion_frames, uniform_frames, num_blocks, chars_per_row=64):
     """Create animation comparing masked diffusion and uniform diffusion"""
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8))
 
     for ax in [ax1, ax2]:
         ax.set_xlim(0, 1)
@@ -259,7 +259,7 @@ def animate_comparison(diffusion_frames, uniform_frames, num_blocks, chars_per_r
         text_obj1.set_text("\n".join(lines))
 
         ax1.set_title(
-            f"Uniform Diffusion - Block {block_idx + 1}/{num_blocks} - Step {step_idx}/100",
+            f"Uniform Diffusion - Block {block_idx + 1}/{num_blocks} - Step {step_idx}/128",
             fontsize=14,
             pad=-20,
             y=0.98,
@@ -313,8 +313,8 @@ def main():
     parser.add_argument(
         "--blocks",
         type=int,
-        default=5,
-        help="Number of blocks to generate (default: 5)",
+        default=3,
+        help="Number of blocks to generate (default: 3)",
     )
     parser.add_argument(
         "--prompt-len",
@@ -322,8 +322,17 @@ def main():
         default=16,
         help="Length of initial prompt (default: 16)",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=1337,
+        help="Random seed for generation (default: 1337)",
+    )
 
     args = parser.parse_args()
+
+    # Set random seed
+    torch.manual_seed(args.seed)
 
     device = torch.device(
         "cuda"
@@ -353,7 +362,7 @@ def main():
     uniform_model.eval()
 
     uniform_frames = generate_uniform_frames(
-        uniform_model, args.blocks, args.prompt_len, num_steps=100, temp=0.6
+        uniform_model, args.blocks, args.prompt_len, num_steps=128, temp=0.8
     )
 
     print("Done! Showing comparison animation...\n")
